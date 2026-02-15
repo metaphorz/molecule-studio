@@ -53,6 +53,14 @@
   .c-purple { color: rgba(200,150,255,0.5); }
   .c-green { color: rgba(150,220,150,0.5); }
   .c-dim { color: rgba(255,255,255,0.3); }
+  #view-toggle { position: absolute; top: 20px; right: 24px; z-index: 20; display: flex; align-items: center; gap: 8px; }
+  #view-toggle label { font-size: 11px; font-weight: 600; letter-spacing: 1px; color: rgba(255,255,255,0.35); text-transform: uppercase; cursor: pointer; transition: color 0.2s; }
+  #view-toggle label.active { color: rgba(255,255,255,0.7); }
+  #view-toggle .switch { width: 36px; height: 20px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 10px; cursor: pointer; position: relative; transition: background 0.2s; }
+  #view-toggle .switch .knob { width: 14px; height: 14px; background: rgba(255,255,255,0.6); border-radius: 50%;
+    position: absolute; top: 2px; left: 2px; transition: left 0.2s; }
+  #view-toggle .switch.on .knob { left: 18px; }
   @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
@@ -80,6 +88,12 @@
   <div id="response-label"></div>
   <div id="response-json"></div>
   <div id="response-source"></div>
+</div>
+
+<div id="view-toggle">
+  <label id="lbl-2d">2D</label>
+  <div class="switch on" id="view-switch"><div class="knob"></div></div>
+  <label id="lbl-3d" class="active">3D</label>
 </div>
 
 <div id="controls-hint">drag to orbit · scroll to zoom · click to toggle spin · hover for info</div>
@@ -277,18 +291,25 @@ const sphereCam = { theta: Math.PI / 4, phi: Math.PI / 3, radius: 10 };
 const camTarget = new THREE.Vector3();
 const drag = { active: false, lastX: 0, lastY: 0 };
 let autoRotate = true, autoTimer = null, rotationLocked = false, didDrag = false;
+let viewMode = '3d'; // '3d' or '2d'
 
 function animate() {
   requestAnimationFrame(animate);
-  if (autoRotate) sphereCam.theta += 0.003;
-  const { theta, phi, radius } = sphereCam;
-  camera.position.set(
-    camTarget.x + radius * Math.sin(phi) * Math.cos(theta),
-    camTarget.y + radius * Math.cos(phi),
-    camTarget.z + radius * Math.sin(phi) * Math.sin(theta));
-  camera.lookAt(camTarget);
+  if (viewMode === '3d') {
+    if (autoRotate) sphereCam.theta += 0.003;
+    const { theta, phi, radius } = sphereCam;
+    camera.position.set(
+      camTarget.x + radius * Math.sin(phi) * Math.cos(theta),
+      camTarget.y + radius * Math.cos(phi),
+      camTarget.z + radius * Math.sin(phi) * Math.sin(theta));
+  } else {
+    // 2D: camera looks straight down Z axis, add panOffset
+    camera.position.set(camTarget.x + panOffset.x, camTarget.y + panOffset.y, sphereCam.radius);
+  }
+  camera.lookAt(viewMode === '2d' ? new THREE.Vector3(camTarget.x + panOffset.x, camTarget.y + panOffset.y, 0) : camTarget);
   renderer.render(scene, camera);
 }
+const panOffset = { x: 0, y: 0 };
 animate();
 
 window.addEventListener('resize', () => {
@@ -299,20 +320,29 @@ window.addEventListener('resize', () => {
 
 renderer.domElement.addEventListener('mousedown', e => {
   drag.active = true; drag.lastX = e.clientX; drag.lastY = e.clientY;
-  didDrag = false; autoRotate = false; clearTimeout(autoTimer);
+  didDrag = false;
+  if (viewMode === '3d') { autoRotate = false; clearTimeout(autoTimer); }
 });
 window.addEventListener('mousemove', e => {
   if (!drag.active) return;
   const dx = e.clientX - drag.lastX, dy = e.clientY - drag.lastY;
   if (Math.abs(dx) > 2 || Math.abs(dy) > 2) didDrag = true;
-  sphereCam.theta -= dx * 0.008;
-  sphereCam.phi = Math.max(0.1, Math.min(Math.PI - 0.1, sphereCam.phi - dy * 0.008));
+  if (viewMode === '3d') {
+    sphereCam.theta -= dx * 0.008;
+    sphereCam.phi = Math.max(0.1, Math.min(Math.PI - 0.1, sphereCam.phi - dy * 0.008));
+  } else {
+    const panScale = sphereCam.radius * 0.002;
+    panOffset.x -= dx * panScale;
+    panOffset.y += dy * panScale;
+  }
   drag.lastX = e.clientX; drag.lastY = e.clientY;
 });
 window.addEventListener('mouseup', () => {
   drag.active = false;
-  if (!didDrag) { rotationLocked = !rotationLocked; autoRotate = !rotationLocked; }
-  else if (!rotationLocked) { autoTimer = setTimeout(() => { autoRotate = true; }, 2500); }
+  if (viewMode === '3d') {
+    if (!didDrag) { rotationLocked = !rotationLocked; autoRotate = !rotationLocked; }
+    else if (!rotationLocked) { autoTimer = setTimeout(() => { autoRotate = true; }, 2500); }
+  }
 });
 renderer.domElement.addEventListener('wheel', e => {
   e.preventDefault();
@@ -321,36 +351,67 @@ renderer.domElement.addEventListener('wheel', e => {
 
 // Touch
 renderer.domElement.addEventListener('touchstart', e => {
-  if (e.touches.length === 1) { const t = e.touches[0]; drag.active = true; drag.lastX = t.clientX; drag.lastY = t.clientY; autoRotate = false; clearTimeout(autoTimer); }
+  if (e.touches.length === 1) {
+    const t = e.touches[0]; drag.active = true; drag.lastX = t.clientX; drag.lastY = t.clientY;
+    if (viewMode === '3d') { autoRotate = false; clearTimeout(autoTimer); }
+  }
 }, { passive: true });
 renderer.domElement.addEventListener('touchmove', e => {
   if (!drag.active || e.touches.length !== 1) return; e.preventDefault();
   const t = e.touches[0];
-  sphereCam.theta -= (t.clientX - drag.lastX) * 0.008;
-  sphereCam.phi = Math.max(0.1, Math.min(Math.PI - 0.1, sphereCam.phi - (t.clientY - drag.lastY) * 0.008));
+  const dx = t.clientX - drag.lastX, dy = t.clientY - drag.lastY;
+  if (viewMode === '3d') {
+    sphereCam.theta -= dx * 0.008;
+    sphereCam.phi = Math.max(0.1, Math.min(Math.PI - 0.1, sphereCam.phi - dy * 0.008));
+  } else {
+    const panScale = sphereCam.radius * 0.002;
+    panOffset.x -= dx * panScale;
+    panOffset.y += dy * panScale;
+  }
   drag.lastX = t.clientX; drag.lastY = t.clientY;
 }, { passive: false });
 renderer.domElement.addEventListener('touchend', () => {
-  drag.active = false; if (!rotationLocked) autoTimer = setTimeout(() => autoRotate = true, 2500);
+  drag.active = false;
+  if (viewMode === '3d' && !rotationLocked) autoTimer = setTimeout(() => autoRotate = true, 2500);
 });
 
 // ── Build 3D molecule ───────────────────────────────────────────────────
 let atomMeshes = [], bondMeshes = [], currentMol = null, currentRawBondOrders = null;
 
-function buildMolecule(mol, rawBondOrders) {
+function makeTextSprite(text, color) {
+  const canvas = document.createElement('canvas');
+  const sz = 128; canvas.width = sz; canvas.height = sz;
+  const ctx = canvas.getContext('2d');
+  ctx.font = 'bold 64px Inter, system-ui, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#' + color.toString(16).padStart(6,'0');
+  ctx.fillText(text, sz/2, sz/2);
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(1.0, 1.0, 1);
+  return sprite;
+}
+
+function clearMolGroup() {
   while (molGroup.children.length) {
     const ch = molGroup.children[0];
     if (ch.geometry) ch.geometry.dispose();
-    if (ch.material) ch.material.dispose();
+    if (ch.material) { if (ch.material.map) ch.material.map.dispose(); ch.material.dispose(); }
     molGroup.remove(ch);
   }
   atomMeshes = []; bondMeshes = [];
+}
+
+function buildMolecule(mol, rawBondOrders) {
+  clearMolGroup();
   currentMol = mol;
   currentRawBondOrders = rawBondOrders || null;
+  const is2D = viewMode === '2d';
   const { atoms, bonds } = mol;
   const SCALE = 1.2;
   let cx=0,cy=0,cz=0;
-  atoms.forEach(([,x,y,z]) => { cx+=x; cy+=y; cz+=z; });
+  atoms.forEach(([,x,y,z]) => { cx+=x; cy+=y; cz+= (is2D ? 0 : z); });
   cx/=atoms.length; cy/=atoms.length; cz/=atoms.length;
 
   // Count bonds per atom
@@ -365,69 +426,135 @@ function buildMolecule(mol, rawBondOrders) {
 
   const positions = atoms.map(([el,x,y,z], idx) => {
     const p = getEl(el);
-    const geo = new THREE.SphereGeometry(p.radius * 0.4, 24, 24);
-    const mat = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.3, metalness: 0.1 });
-    const mesh = new THREE.Mesh(geo, mat);
-    const px=(x-cx)*SCALE, py=(y-cy)*SCALE, pz=(z-cz)*SCALE;
-    mesh.position.set(px, py, pz);
-    mesh.userData = {
-      type: 'atom', index: idx, element: el,
-      origX: x, origY: y, origZ: z,
-      bondCount: bondCounts[idx], neighbors: bondNeighbors[idx],
-      baseColor: p.color,
-    };
-    molGroup.add(mesh);
-    atomMeshes.push(mesh);
+    const px=(x-cx)*SCALE, py=(y-cy)*SCALE, pz= is2D ? 0 : (z-cz)*SCALE;
+
+    if (is2D) {
+      // 2D: text label sprite, no sphere (except for C which we skip label for cleaner look)
+      const showLabel = el !== 'C';
+      if (showLabel) {
+        const sprite = makeTextSprite(el, p.color === 0x333333 ? 0xcccccc : p.color);
+        sprite.position.set(px, py, pz);
+        sprite.userData = {
+          type: 'atom', index: idx, element: el,
+          origX: x, origY: y, origZ: z || 0,
+          bondCount: bondCounts[idx], neighbors: bondNeighbors[idx],
+          baseColor: p.color,
+        };
+        molGroup.add(sprite);
+        atomMeshes.push(sprite);
+      } else {
+        // Small invisible hitbox for carbon
+        const geo = new THREE.SphereGeometry(0.15, 8, 8);
+        const mat = new THREE.MeshBasicMaterial({ visible: false });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(px, py, pz);
+        mesh.userData = {
+          type: 'atom', index: idx, element: el,
+          origX: x, origY: y, origZ: z || 0,
+          bondCount: bondCounts[idx], neighbors: bondNeighbors[idx],
+          baseColor: p.color,
+        };
+        molGroup.add(mesh);
+        atomMeshes.push(mesh);
+      }
+    } else {
+      // 3D: sphere
+      const geo = new THREE.SphereGeometry(p.radius * 0.4, 24, 24);
+      const mat = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.3, metalness: 0.1 });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(px, py, pz);
+      mesh.userData = {
+        type: 'atom', index: idx, element: el,
+        origX: x, origY: y, origZ: z,
+        bondCount: bondCounts[idx], neighbors: bondNeighbors[idx],
+        baseColor: p.color,
+      };
+      molGroup.add(mesh);
+      atomMeshes.push(mesh);
+    }
     return new THREE.Vector3(px, py, pz);
   });
 
-  const bondMat = new THREE.MeshStandardMaterial({ color: 0x666680, roughness: 0.5, metalness: 0.1 });
-  bonds.forEach(([a,b,order], bondIdx) => {
-    const pa=positions[a], pb=positions[b];
-    const mid = new THREE.Vector3().addVectors(pa,pb).multiplyScalar(0.5);
-    const dir = new THREE.Vector3().subVectors(pb,pa);
-    const len = dir.length(); dir.normalize();
-    const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dir);
+  if (is2D) {
+    // 2D bonds: thin flat lines using cylinders (very thin)
+    const lineMat = new THREE.MeshBasicMaterial({ color: 0x999999 });
+    bonds.forEach(([a,b,order], bondIdx) => {
+      const pa=positions[a], pb=positions[b];
+      const dir = new THREE.Vector3().subVectors(pb,pa);
+      const len = dir.length(); dir.normalize();
+      const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dir);
+      const mid = new THREE.Vector3().addVectors(pa,pb).multiplyScalar(0.5);
 
-    // Compute real-space bond length from original coordinates
-    const ax=atoms[a], bx=atoms[b];
-    const realLen = Math.sqrt((ax[1]-bx[1])**2 + (ax[2]-bx[2])**2 + (ax[3]-bx[3])**2);
-    const rawOrd = rawBondOrders ? rawBondOrders[bondIdx] : order;
+      const ax=atoms[a], bx=atoms[b];
+      const realLen = Math.sqrt((ax[1]-bx[1])**2 + (ax[2]-bx[2])**2 + ((ax[3]||0)-(bx[3]||0))**2);
+      const rawOrd = rawBondOrders ? rawBondOrders[bondIdx] : order;
+      const bondData = { type:'bond', bondIndex:bondIdx, atomA:a, atomB:b,
+        elemA:atoms[a][0], elemB:atoms[b][0], order, rawOrder:rawOrd, length:realLen };
 
-    const bondData = {
-      type: 'bond', bondIndex: bondIdx,
-      atomA: a, atomB: b,
-      elemA: atoms[a][0], elemB: atoms[b][0],
-      order: order, rawOrder: rawOrd,
-      length: realLen,
-    };
+      const makeLine = off => {
+        const geo = new THREE.CylinderGeometry(0.03, 0.03, len, 4);
+        const mat2 = lineMat.clone();
+        const mesh = new THREE.Mesh(geo, mat2);
+        mesh.position.copy(mid);
+        if (off) mesh.position.add(off);
+        mesh.quaternion.copy(quat);
+        mesh.userData = bondData;
+        molGroup.add(mesh);
+        bondMeshes.push(mesh);
+      };
 
-    const makeCyl = off => {
-      const r = order > 1 ? 0.04 : 0.06;
-      const geo = new THREE.CylinderGeometry(r,r,len,8);
-      const mat2 = bondMat.clone();
-      const mesh = new THREE.Mesh(geo, mat2);
-      mesh.position.copy(mid);
-      if (off) mesh.position.add(off);
-      mesh.quaternion.copy(quat);
-      mesh.userData = bondData;
-      molGroup.add(mesh);
-      bondMeshes.push(mesh);
-    };
-    if (order === 1) { makeCyl(null); }
-    else {
-      const perp = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0,0,1));
-      if (perp.length() < 0.001) perp.crossVectors(dir, new THREE.Vector3(1,0,0));
-      perp.normalize().multiplyScalar(0.08);
-      makeCyl(perp); makeCyl(perp.clone().negate());
-      if (order === 3) makeCyl(null);
-    }
-  });
+      if (order === 1) { makeLine(null); }
+      else {
+        const perp = new THREE.Vector3(-dir.y, dir.x, 0).normalize().multiplyScalar(0.1);
+        makeLine(perp); makeLine(perp.clone().negate());
+        if (order === 3) makeLine(null);
+      }
+    });
+  } else {
+    // 3D bonds: cylinders
+    const bondMat = new THREE.MeshStandardMaterial({ color: 0x666680, roughness: 0.5, metalness: 0.1 });
+    bonds.forEach(([a,b,order], bondIdx) => {
+      const pa=positions[a], pb=positions[b];
+      const mid = new THREE.Vector3().addVectors(pa,pb).multiplyScalar(0.5);
+      const dir = new THREE.Vector3().subVectors(pb,pa);
+      const len = dir.length(); dir.normalize();
+      const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dir);
+
+      const ax=atoms[a], bx=atoms[b];
+      const realLen = Math.sqrt((ax[1]-bx[1])**2 + (ax[2]-bx[2])**2 + (ax[3]-bx[3])**2);
+      const rawOrd = rawBondOrders ? rawBondOrders[bondIdx] : order;
+
+      const bondData = { type:'bond', bondIndex:bondIdx, atomA:a, atomB:b,
+        elemA:atoms[a][0], elemB:atoms[b][0], order, rawOrder:rawOrd, length:realLen };
+
+      const makeCyl = off => {
+        const r = order > 1 ? 0.04 : 0.06;
+        const geo = new THREE.CylinderGeometry(r,r,len,8);
+        const mat2 = bondMat.clone();
+        const mesh = new THREE.Mesh(geo, mat2);
+        mesh.position.copy(mid);
+        if (off) mesh.position.add(off);
+        mesh.quaternion.copy(quat);
+        mesh.userData = bondData;
+        molGroup.add(mesh);
+        bondMeshes.push(mesh);
+      };
+      if (order === 1) { makeCyl(null); }
+      else {
+        const perp = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0,0,1));
+        if (perp.length() < 0.001) perp.crossVectors(dir, new THREE.Vector3(1,0,0));
+        perp.normalize().multiplyScalar(0.08);
+        makeCyl(perp); makeCyl(perp.clone().negate());
+        if (order === 3) makeCyl(null);
+      }
+    });
+  }
 
   let maxDist = 0;
   positions.forEach(p => { maxDist = Math.max(maxDist, p.length()); });
   sphereCam.radius = Math.max(5, maxDist * 2.5 + 3);
   camTarget.set(0, 0, 0);
+  panOffset.x = 0; panOffset.y = 0;
 }
 
 // ── Raycaster for hover tooltips ────────────────────────────────────────
@@ -438,14 +565,20 @@ let prevHighlight = null;
 
 function clearHighlight() {
   if (prevHighlight) {
-    prevHighlight.material.emissive.setHex(0x000000);
+    if (prevHighlight.material.emissive) prevHighlight.material.emissive.setHex(0x000000);
+    else if (prevHighlight.material.color && prevHighlight._origColor) prevHighlight.material.color.setHex(prevHighlight._origColor);
     prevHighlight = null;
   }
 }
 
 function highlightMesh(mesh) {
   if (prevHighlight && prevHighlight !== mesh) clearHighlight();
-  mesh.material.emissive.setHex(0x222244);
+  if (mesh.material.emissive) {
+    mesh.material.emissive.setHex(0x222244);
+  } else if (mesh.material.color) {
+    mesh._origColor = mesh._origColor || mesh.material.color.getHex();
+    mesh.material.color.setHex(0xffffff);
+  }
   prevHighlight = mesh;
 }
 
@@ -621,6 +754,32 @@ async function fetchMolecule(name) {
     showError('"' + name + '" not found locally or on PubChem. Try a common name like "serotonin" or formula like "C6H12O6".');
   }
 }
+
+// ── 2D/3D toggle ────────────────────────────────────────────────────────
+const viewSwitch = document.getElementById('view-switch');
+const lbl2d = document.getElementById('lbl-2d');
+const lbl3d = document.getElementById('lbl-3d');
+const hintEl = document.getElementById('controls-hint');
+
+function setViewMode(mode) {
+  viewMode = mode;
+  if (mode === '3d') {
+    viewSwitch.classList.add('on');
+    lbl3d.classList.add('active'); lbl2d.classList.remove('active');
+    hintEl.textContent = 'drag to orbit \u00b7 scroll to zoom \u00b7 click to toggle spin \u00b7 hover for info';
+    autoRotate = !rotationLocked;
+  } else {
+    viewSwitch.classList.remove('on');
+    lbl2d.classList.add('active'); lbl3d.classList.remove('active');
+    hintEl.textContent = 'drag to pan \u00b7 scroll to zoom \u00b7 hover for info';
+    autoRotate = false;
+  }
+  // Rebuild molecule in new mode
+  if (currentMol) buildMolecule(currentMol, currentRawBondOrders);
+}
+viewSwitch.addEventListener('click', () => setViewMode(viewMode === '3d' ? '2d' : '3d'));
+lbl2d.addEventListener('click', () => setViewMode('2d'));
+lbl3d.addEventListener('click', () => setViewMode('3d'));
 
 searchEl.addEventListener('input', () => renderSuggestions(searchEl.value));
 searchEl.addEventListener('focus', () => renderSuggestions(searchEl.value));
