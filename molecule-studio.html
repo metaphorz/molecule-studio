@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Molecule Studio</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0f; font-family: 'Inter', system-ui, sans-serif; overflow: hidden; color: #fff; }
+  #canvas-container { position: absolute; inset: 0; }
+  #title { position: absolute; top: 20px; left: 24px; z-index: 10; pointer-events: none;
+    font-size: 13px; font-weight: 600; letter-spacing: 3px; color: rgba(255,255,255,0.5); text-transform: uppercase; }
+  #search-wrap { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 20; width: 360px; }
+  #search { width: 100%; padding: 10px 40px 10px 16px; border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px; background: rgba(255,255,255,0.05); backdrop-filter: blur(20px);
+    color: #fff; font-size: 14px; outline: none; transition: border-color 0.2s; font-family: inherit; }
+  #search:hover, #search:focus { border-color: rgba(255,255,255,0.25); }
+  #search::placeholder { color: rgba(255,255,255,0.3); }
+  #spinner { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); display: none;
+    width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #fff;
+    border-radius: 50%; animation: spin 0.6s linear infinite; }
+  #suggestions { margin-top: 4px; background: rgba(15,15,25,0.95); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px; overflow: hidden; max-height: 280px; overflow-y: auto; backdrop-filter: blur(20px); display: none; }
+  .suggestion { padding: 8px 16px; cursor: pointer; font-size: 13px; color: rgba(255,255,255,0.7); transition: background 0.15s; }
+  .suggestion:hover { background: rgba(255,255,255,0.08); color: #fff; }
+  #error-box { position: absolute; top: 72px; left: 50%; transform: translateX(-50%); z-index: 10;
+    background: rgba(200,50,50,0.15); border: 1px solid rgba(200,50,50,0.3); border-radius: 8px;
+    padding: 8px 16px; color: rgba(255,150,150,0.9); font-size: 13px; display: none; max-width: 400px; text-align: center; }
+  #mol-info { position: absolute; bottom: 24px; left: 24px; z-index: 10; pointer-events: none; }
+  #mol-name { font-size: 24px; font-weight: 300; color: rgba(255,255,255,0.9); letter-spacing: -0.5px; }
+  #mol-formula { font-size: 16px; color: rgba(255,255,255,0.4); margin-top: 2px; font-weight: 300; }
+  #mol-stats { font-size: 11px; color: rgba(255,255,255,0.2); margin-top: 6px; }
+  #response-panel { position: absolute; bottom: 24px; right: 24px; z-index: 10; max-width: 280px; display: none; }
+  #response-label { font-size: 10px; font-weight: 600; letter-spacing: 1.5px; color: rgba(255,255,255,0.25); text-transform: uppercase; margin-bottom: 6px; }
+  #response-json { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 8px; padding: 12px; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 10px;
+    color: rgba(255,255,255,0.35); line-height: 1.6; max-height: 200px; overflow-y: auto; white-space: pre; }
+  #response-source { font-size: 9px; color: rgba(255,255,255,0.15); margin-top: 4px; }
+  #controls-hint { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 10;
+    pointer-events: none; font-size: 10px; color: rgba(255,255,255,0.15); letter-spacing: 0.5px; }
+  #hover-tooltip { position: absolute; z-index: 30; pointer-events: none; display: none;
+    background: rgba(10,10,20,0.92); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px;
+    padding: 10px 14px; backdrop-filter: blur(16px); min-width: 140px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+  #hover-tooltip .tt-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  #hover-tooltip .tt-swatch { width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.2); flex-shrink: 0; }
+  #hover-tooltip .tt-symbol { font-size: 16px; font-weight: 600; color: rgba(255,255,255,0.9); }
+  #hover-tooltip .tt-name { font-size: 12px; color: rgba(255,255,255,0.5); }
+  #hover-tooltip .tt-row { font-size: 11px; color: rgba(255,255,255,0.35); line-height: 1.6;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace; }
+  #hover-tooltip .tt-label { color: rgba(255,255,255,0.2); }
+  .c-blue { color: rgba(130,170,255,0.6); }
+  .c-purple { color: rgba(200,150,255,0.5); }
+  .c-green { color: rgba(150,220,150,0.5); }
+  .c-dim { color: rgba(255,255,255,0.3); }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div id="canvas-container"></div>
+<div id="title">Molecule Studio</div>
+
+<div id="search-wrap">
+  <form id="search-form" style="position:relative;">
+    <input id="search" type="text" placeholder="Search any molecule... (e.g. serotonin, penicillin, salt)" autocomplete="off">
+    <div id="spinner"></div>
+  </form>
+  <div id="suggestions"></div>
+</div>
+
+<div id="error-box"></div>
+
+<div id="mol-info" style="display:none;">
+  <div id="mol-name"></div>
+  <div id="mol-formula"></div>
+  <div id="mol-stats"></div>
+</div>
+
+<div id="response-panel">
+  <div id="response-label"></div>
+  <div id="response-json"></div>
+  <div id="response-source"></div>
+</div>
+
+<div id="controls-hint">drag to orbit · scroll to zoom · click to toggle spin · hover for info</div>
+
+<div id="hover-tooltip">
+  <div class="tt-header">
+    <div class="tt-swatch" id="tt-swatch"></div>
+    <span class="tt-symbol" id="tt-symbol"></span>
+    <span class="tt-name" id="tt-name"></span>
+  </div>
+  <div id="tt-rows"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ── Element visual properties (CPK coloring) ────────────────────────────
+const ELEMENTS = {
+  H:{color:0xffffff,radius:0.31},He:{color:0xd9ffff,radius:0.28},
+  Li:{color:0xcc80ff,radius:1.28},Be:{color:0xc2ff00,radius:0.96},
+  B:{color:0xffb5b5,radius:0.84},C:{color:0x333333,radius:0.77},
+  N:{color:0x3050f8,radius:0.71},O:{color:0xcc0000,radius:0.66},
+  F:{color:0x90e050,radius:0.64},Ne:{color:0xb3e3f5,radius:0.58},
+  Na:{color:0xab5cf2,radius:1.66},Mg:{color:0x8aff00,radius:1.41},
+  Al:{color:0xbfa6a6,radius:1.21},Si:{color:0xf0c8a0,radius:1.11},
+  P:{color:0xff8000,radius:1.07},S:{color:0xdddd00,radius:1.05},
+  Cl:{color:0x1ff01f,radius:0.99},Ar:{color:0x80d1e3,radius:1.06},
+  K:{color:0x8f40d4,radius:2.03},Ca:{color:0x3dff00,radius:1.76},
+  Fe:{color:0xe06633,radius:1.32},Co:{color:0xf090a0,radius:1.26},
+  Ni:{color:0x50d050,radius:1.24},Cu:{color:0xc88033,radius:1.32},
+  Zn:{color:0x7d80b0,radius:1.22},Se:{color:0xffa100,radius:1.20},
+  Br:{color:0xa62929,radius:1.14},I:{color:0x940094,radius:1.33},
+};
+const getEl = s => ELEMENTS[s] || {color:0xcccccc,radius:0.7};
+
+const ELEM_NAMES = {
+  H:"Hydrogen",He:"Helium",Li:"Lithium",Be:"Beryllium",B:"Boron",C:"Carbon",
+  N:"Nitrogen",O:"Oxygen",F:"Fluorine",Ne:"Neon",Na:"Sodium",Mg:"Magnesium",
+  Al:"Aluminum",Si:"Silicon",P:"Phosphorus",S:"Sulfur",Cl:"Chlorine",Ar:"Argon",
+  K:"Potassium",Ca:"Calcium",Fe:"Iron",Co:"Cobalt",Ni:"Nickel",Cu:"Copper",
+  Zn:"Zinc",Se:"Selenium",Br:"Bromine",I:"Iodine",Sc:"Scandium",Ti:"Titanium",
+  V:"Vanadium",Cr:"Chromium",Mn:"Manganese",Ga:"Gallium",Ge:"Germanium",
+  As:"Arsenic",Kr:"Krypton",Ag:"Silver",Sn:"Tin",Sb:"Antimony",Te:"Tellurium",Xe:"Xenon"
+};
+
+const BOND_NAMES = { 1:"Single", 2:"Double", 3:"Triple" };
+const PUBCHEM_BOND_NAMES = { 1:"Single",2:"Double",3:"Triple",4:"Quadruple",5:"Dative",6:"Complex",7:"Ionic",8:"Unknown" };
+
+const ATOMIC_SYM = [
+  "","H","He","Li","Be","B","C","N","O","F","Ne",
+  "Na","Mg","Al","Si","P","S","Cl","Ar","K","Ca",
+  "Sc","Ti","V","Cr","Mn","Fe","Co","Ni","Cu","Zn",
+  "Ga","Ge","As","Se","Br","Kr","Rb","Sr","Y","Zr",
+  "Nb","Mo","Tc","Ru","Rh","Pd","Ag","Cd","In","Sn",
+  "Sb","Te","I","Xe"
+];
+
+// ── Parse PubChem JSON (2D or 3D) ───────────────────────────────────────
+function parsePubChem(data) {
+  const c = data.PC_Compounds[0];
+  const elems = c.atoms.element, aids = c.atoms.aid;
+  let xs, ys, zs;
+  const cb = c.coords[0];
+  if (cb.conformers && cb.conformers[0]) {
+    const cf = cb.conformers[0]; xs = cf.x; ys = cf.y; zs = cf.z;
+  } else { xs = cb.x || []; ys = cb.y || []; zs = null; }
+  const aidMap = {}; aids.forEach((a,i) => aidMap[a] = i);
+  const atoms = elems.map((an,i) => [ATOMIC_SYM[an]||"X", xs[i]||0, ys[i]||0, (zs&&zs[i])||0]);
+  const bonds = [], rawBondOrders = [];
+  if (c.bonds) {
+    const a1=c.bonds.aid1, a2=c.bonds.aid2, ord=c.bonds.order;
+    for (let i=0;i<a1.length;i++) {
+      const o = ord[i];
+      rawBondOrders.push(o);
+      bonds.push([aidMap[a1[i]], aidMap[a2[i]], (o>=1&&o<=3)?o:1]);
+    }
+  }
+  let name="Unknown", formula="", trade="";
+  if (c.props) for (const p of c.props) {
+    const l = p.urn?.label;
+    if (l==="IUPAC Name" && p.urn?.name==="Preferred") name = p.value?.sval||name;
+    if (l==="IUPAC Name" && p.urn?.name==="Traditional") trade = p.value?.sval||"";
+    if (l==="Molecular Formula") formula = p.value?.sval||formula;
+  }
+  const dn = (trade && trade.length < name.length) ? trade : name;
+  const cap = dn.charAt(0).toUpperCase() + dn.slice(1);
+  const sub = formula.replace(/(\d)/g, (_,d) => "\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089"[+d]);
+  return { name: cap, formula: sub, atoms, bonds, rawBondOrders };
+}
+
+// ── Local molecule database ─────────────────────────────────────────────
+const MOLECULES = {
+  water: { name:"Water", formula:"H\u2082O",
+    atoms:[["O",0,0,0],["H",0.757,0.586,0],["H",-0.757,0.586,0]], bonds:[[0,1,1],[0,2,1]] },
+  "carbon dioxide": { name:"Carbon Dioxide", formula:"CO\u2082",
+    atoms:[["C",0,0,0],["O",-1.16,0,0],["O",1.16,0,0]], bonds:[[0,1,2],[0,2,2]] },
+  methane: { name:"Methane", formula:"CH\u2084",
+    atoms:[["C",0,0,0],["H",0.63,0.63,0.63],["H",-0.63,-0.63,0.63],["H",-0.63,0.63,-0.63],["H",0.63,-0.63,-0.63]],
+    bonds:[[0,1,1],[0,2,1],[0,3,1],[0,4,1]] },
+  ammonia: { name:"Ammonia", formula:"NH\u2083",
+    atoms:[["N",0,0,0],["H",0.94,0.31,0],["H",-0.47,0.31,0.81],["H",-0.47,0.31,-0.81]],
+    bonds:[[0,1,1],[0,2,1],[0,3,1]] },
+  ethanol: { name:"Ethanol", formula:"C\u2082H\u2086O",
+    atoms:[["C",-0.75,0,0],["C",0.75,0,0],["O",1.45,1.1,0],["H",-1.16,0.52,0.87],["H",-1.16,0.52,-0.87],["H",-1.16,-1.04,0],["H",1.16,-0.52,0.87],["H",1.16,-0.52,-0.87],["H",2.4,0.95,0]],
+    bonds:[[0,1,1],[1,2,1],[0,3,1],[0,4,1],[0,5,1],[1,6,1],[1,7,1],[2,8,1]] },
+  benzene: { name:"Benzene", formula:"C\u2086H\u2086",
+    atoms:(()=>{const a=[],b=1.4;for(let i=0;i<6;i++){const g=Math.PI/3*i;a.push(["C",b*Math.cos(g),b*Math.sin(g),0])}for(let i=0;i<6;i++){const g=Math.PI/3*i;a.push(["H",2.48*Math.cos(g),2.48*Math.sin(g),0])}return a})(),
+    bonds:[[0,1,2],[1,2,1],[2,3,2],[3,4,1],[4,5,2],[5,0,1],[0,6,1],[1,7,1],[2,8,1],[3,9,1],[4,10,1],[5,11,1]] },
+  formaldehyde: { name:"Formaldehyde", formula:"CH\u2082O",
+    atoms:[["C",0,0,0],["O",0,1.2,0],["H",0.94,-0.54,0],["H",-0.94,-0.54,0]], bonds:[[0,1,2],[0,2,1],[0,3,1]] },
+  acetone: { name:"Acetone", formula:"C\u2083H\u2086O",
+    atoms:[["C",0,0,0],["O",0,1.22,0],["C",-1.51,-0.26,0],["C",1.51,-0.26,0],["H",-1.57,-1.35,0],["H",-2.04,0.18,0.87],["H",-2.04,0.18,-0.87],["H",1.57,-1.35,0],["H",2.04,0.18,0.87],["H",2.04,0.18,-0.87]],
+    bonds:[[0,1,2],[0,2,1],[0,3,1],[2,4,1],[2,5,1],[2,6,1],[3,7,1],[3,8,1],[3,9,1]] },
+  "acetic acid": { name:"Acetic Acid", formula:"C\u2082H\u2084O\u2082",
+    atoms:[["C",0,0,0],["C",1.52,0,0],["O",2.1,1.1,0],["O",2.1,-1.0,0],["H",-0.4,0.52,0.87],["H",-0.4,0.52,-0.87],["H",-0.4,-1.04,0],["H",3.06,-0.85,0]],
+    bonds:[[0,1,1],[1,2,2],[1,3,1],[0,4,1],[0,5,1],[0,6,1],[3,7,1]] },
+  caffeine: { name:"Caffeine", formula:"C\u2088H\u2081\u2080N\u2084O\u2082",
+    atoms:[["N",0,0,0],["C",1.3,0.4,0],["N",1.9,1.6,0],["C",1.0,2.5,0],["C",-0.4,2.1,0],["C",-0.8,0.7,0],["N",-1.6,2.8,0],["C",-1.4,4.1,0],["N",-0.1,4.2,0],["O",2.45,-0.35,0],["O",-2.0,0.2,0],["C",0.25,-1.4,0],["H",1.27,-1.7,0],["H",-0.25,-1.85,0.87],["H",-0.25,-1.85,-0.87],["C",3.3,1.95,0],["H",3.75,1.5,0.87],["H",3.75,1.5,-0.87],["H",3.4,3.0,0],["C",-2.8,2.2,0],["H",-3.3,2.65,0.87],["H",-3.3,2.65,-0.87],["H",-2.75,1.12,0],["H",-2.1,4.9,0]],
+    bonds:[[0,1,1],[1,2,1],[2,3,1],[3,4,2],[4,5,1],[5,0,1],[4,8,1],[8,7,2],[7,6,1],[6,3,1],[1,9,2],[5,10,2],[0,11,1],[11,12,1],[11,13,1],[11,14,1],[2,15,1],[15,16,1],[15,17,1],[15,18,1],[6,19,1],[19,20,1],[19,21,1],[19,22,1],[7,23,1]] },
+  aspirin: { name:"Aspirin", formula:"C\u2089H\u2088O\u2084",
+    atoms:(()=>{const r=1.4,a=[];for(let i=0;i<6;i++)a.push(["C",r*Math.cos(Math.PI/3*i),r*Math.sin(Math.PI/3*i),0]);a.push(["C",2.7,0.3,0],["O",3.3,1.3,0],["O",3.2,-0.8,0],["H",4.15,-0.65,0],["O",1.5,2.7,0],["C",0.65,3.7,0],["O",-0.5,3.55,0],["C",1.3,5.0,0],["H",0.6,5.8,0],["H",2.1,5.2,0.8],["H",2.1,5.2,-0.8],["H",-0.7*2.5,1.21*2.5*0.72,0],["H",-2.5,0,0],["H",-0.7*2.5,-1.21*2.5*0.72,0],["H",0.7*2.0,-1.21*2.0,0]);return a})(),
+    bonds:[[0,1,2],[1,2,1],[2,3,2],[3,4,1],[4,5,2],[5,0,1],[0,6,1],[6,7,2],[6,8,1],[8,9,1],[1,10,1],[10,11,1],[11,12,2],[11,13,1],[13,14,1],[13,15,1],[13,16,1],[2,17,1],[3,18,1],[4,19,1],[5,20,1]] },
+  hydrogen: { name:"Hydrogen", formula:"H\u2082", atoms:[["H",-0.37,0,0],["H",0.37,0,0]], bonds:[[0,1,1]] },
+  oxygen: { name:"Oxygen", formula:"O\u2082", atoms:[["O",-0.6,0,0],["O",0.6,0,0]], bonds:[[0,1,2]] },
+  nitrogen: { name:"Nitrogen", formula:"N\u2082", atoms:[["N",-0.55,0,0],["N",0.55,0,0]], bonds:[[0,1,3]] },
+  "hydrogen peroxide": { name:"Hydrogen Peroxide", formula:"H\u2082O\u2082",
+    atoms:[["O",-0.7,0,0],["O",0.7,0,0],["H",-1.1,0.9,0.3],["H",1.1,-0.9,-0.3]], bonds:[[0,1,1],[0,2,1],[1,3,1]] },
+  "sulfuric acid": { name:"Sulfuric Acid", formula:"H\u2082SO\u2084",
+    atoms:[["S",0,0,0],["O",1.2,0.8,0],["O",-1.2,0.8,0],["O",0.8,-1.2,0],["O",-0.8,-1.2,0],["H",1.5,-1.7,0],["H",-1.5,-1.7,0]],
+    bonds:[[0,1,2],[0,2,2],[0,3,1],[0,4,1],[3,5,1],[4,6,1]] },
+  "hydrogen cyanide": { name:"Hydrogen Cyanide", formula:"HCN",
+    atoms:[["H",-1.6,0,0],["C",-0.53,0,0],["N",0.63,0,0]], bonds:[[0,1,1],[1,2,3]] },
+  "carbon monoxide": { name:"Carbon Monoxide", formula:"CO",
+    atoms:[["C",-0.56,0,0],["O",0.56,0,0]], bonds:[[0,1,3]] },
+  propane: { name:"Propane", formula:"C\u2083H\u2088",
+    atoms:[["C",-1.27,0,0],["C",0,0.5,0],["C",1.27,0,0],["H",-1.27,-1.09,0],["H",-1.76,0.36,0.9],["H",-1.76,0.36,-0.9],["H",0,1.6,0],["H",0,0.5,1.0],["H",1.27,-1.09,0],["H",1.76,0.36,0.9],["H",1.76,0.36,-0.9]],
+    bonds:[[0,1,1],[1,2,1],[0,3,1],[0,4,1],[0,5,1],[1,6,1],[1,7,1],[2,8,1],[2,9,1],[2,10,1]] },
+  glucose: { name:"Glucose", formula:"C\u2086H\u2081\u2082O\u2086",
+    atoms:[["C",0,0,0],["C",1.5,0.3,0],["C",2.5,-0.8,0.5],["C",2.2,-2.2,0],["C",0.7,-2.5,-0.3],["O",-0.2,-1.4,0.2],["O",-0.5,0.5,1.2],["O",1.8,1.6,0.3],["O",3.9,-0.5,0.2],["O",3.0,-3.1,0.7],["O",0.4,-3.8,0.2],["H",-0.3,0.6,-0.85],["H",1.7,0.0,-1.05],["H",2.3,-0.7,1.6],["H",2.4,-2.3,-1.1],["H",0.5,-2.5,-1.4],["H",-0.2,1.4,1.4],["H",2.65,1.9,0.1],["H",4.1,-0.5,-0.7],["H",2.7,-4.0,0.5],["H",0.9,-4.5,-0.2]],
+    bonds:[[0,1,1],[1,2,1],[2,3,1],[3,4,1],[4,5,1],[5,0,1],[0,6,1],[1,7,1],[2,8,1],[3,9,1],[4,10,1],[0,11,1],[1,12,1],[2,13,1],[3,14,1],[4,15,1],[6,16,1],[7,17,1],[8,18,1],[9,19,1],[10,20,1]] },
+};
+
+const ALIASES = {
+  h2o:"water",h20:"water",co2:"carbon dioxide",ch4:"methane",nh3:"ammonia",
+  etoh:"ethanol",c2h5oh:"ethanol",c6h6:"benzene",hcho:"formaldehyde",ch2o:"formaldehyde",
+  c3h6o:"acetone",h2:"hydrogen",o2:"oxygen",n2:"nitrogen",h2o2:"hydrogen peroxide",
+  h2so4:"sulfuric acid",hcn:"hydrogen cyanide",co:"carbon monoxide",c3h8:"propane",
+  c6h12o6:"glucose",c8h10n4o2:"caffeine",c9h8o4:"aspirin",ch3cooh:"acetic acid",
+  nacl:"sodium chloride",salt:"sodium chloride",
+};
+
+const MOL_KEYS = Object.keys(MOLECULES);
+
+function findLocal(q) {
+  q = q.trim().toLowerCase(); if (!q) return null;
+  if (MOLECULES[q]) return MOLECULES[q];
+  if (ALIASES[q] && MOLECULES[ALIASES[q]]) return MOLECULES[ALIASES[q]];
+  let k = MOL_KEYS.find(k => MOLECULES[k].name.toLowerCase() === q);
+  if (k) return MOLECULES[k];
+  k = MOL_KEYS.find(k => k.includes(q) || MOLECULES[k].name.toLowerCase().includes(q));
+  if (k) return MOLECULES[k];
+  const a = Object.keys(ALIASES).find(a => a.includes(q));
+  if (a) return MOLECULES[ALIASES[a]];
+  return null;
+}
+
+function getSuggestions(q) {
+  q = q.trim().toLowerCase();
+  if (!q) return MOL_KEYS.map(k => MOLECULES[k].name);
+  return MOL_KEYS.filter(k => k.includes(q) || MOLECULES[k].name.toLowerCase().includes(q) || MOLECULES[k].formula.toLowerCase().includes(q)).map(k => MOLECULES[k].name);
+}
+
+// ── Three.js setup ──────────────────────────────────────────────────────
+const container = document.getElementById('canvas-container');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0a0f);
+scene.fog = new THREE.Fog(0x0a0a0f, 20, 60);
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+container.appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0x404060, 0.8));
+const keyLight = new THREE.DirectionalLight(0xffffff, 1.0);
+keyLight.position.set(5, 8, 5); scene.add(keyLight);
+const fillLight = new THREE.DirectionalLight(0x8888cc, 0.4);
+fillLight.position.set(-5, -2, -5); scene.add(fillLight);
+
+const molGroup = new THREE.Group();
+scene.add(molGroup);
+
+const sphereCam = { theta: Math.PI / 4, phi: Math.PI / 3, radius: 10 };
+const camTarget = new THREE.Vector3();
+const drag = { active: false, lastX: 0, lastY: 0 };
+let autoRotate = true, autoTimer = null, rotationLocked = false, didDrag = false;
+
+function animate() {
+  requestAnimationFrame(animate);
+  if (autoRotate) sphereCam.theta += 0.003;
+  const { theta, phi, radius } = sphereCam;
+  camera.position.set(
+    camTarget.x + radius * Math.sin(phi) * Math.cos(theta),
+    camTarget.y + radius * Math.cos(phi),
+    camTarget.z + radius * Math.sin(phi) * Math.sin(theta));
+  camera.lookAt(camTarget);
+  renderer.render(scene, camera);
+}
+animate();
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+renderer.domElement.addEventListener('mousedown', e => {
+  drag.active = true; drag.lastX = e.clientX; drag.lastY = e.clientY;
+  didDrag = false; autoRotate = false; clearTimeout(autoTimer);
+});
+window.addEventListener('mousemove', e => {
+  if (!drag.active) return;
+  const dx = e.clientX - drag.lastX, dy = e.clientY - drag.lastY;
+  if (Math.abs(dx) > 2 || Math.abs(dy) > 2) didDrag = true;
+  sphereCam.theta -= dx * 0.008;
+  sphereCam.phi = Math.max(0.1, Math.min(Math.PI - 0.1, sphereCam.phi - dy * 0.008));
+  drag.lastX = e.clientX; drag.lastY = e.clientY;
+});
+window.addEventListener('mouseup', () => {
+  drag.active = false;
+  if (!didDrag) { rotationLocked = !rotationLocked; autoRotate = !rotationLocked; }
+  else if (!rotationLocked) { autoTimer = setTimeout(() => { autoRotate = true; }, 2500); }
+});
+renderer.domElement.addEventListener('wheel', e => {
+  e.preventDefault();
+  sphereCam.radius = Math.max(3, Math.min(40, sphereCam.radius + e.deltaY * 0.01));
+}, { passive: false });
+
+// Touch
+renderer.domElement.addEventListener('touchstart', e => {
+  if (e.touches.length === 1) { const t = e.touches[0]; drag.active = true; drag.lastX = t.clientX; drag.lastY = t.clientY; autoRotate = false; clearTimeout(autoTimer); }
+}, { passive: true });
+renderer.domElement.addEventListener('touchmove', e => {
+  if (!drag.active || e.touches.length !== 1) return; e.preventDefault();
+  const t = e.touches[0];
+  sphereCam.theta -= (t.clientX - drag.lastX) * 0.008;
+  sphereCam.phi = Math.max(0.1, Math.min(Math.PI - 0.1, sphereCam.phi - (t.clientY - drag.lastY) * 0.008));
+  drag.lastX = t.clientX; drag.lastY = t.clientY;
+}, { passive: false });
+renderer.domElement.addEventListener('touchend', () => {
+  drag.active = false; if (!rotationLocked) autoTimer = setTimeout(() => autoRotate = true, 2500);
+});
+
+// ── Build 3D molecule ───────────────────────────────────────────────────
+let atomMeshes = [], bondMeshes = [], currentMol = null, currentRawBondOrders = null;
+
+function buildMolecule(mol, rawBondOrders) {
+  while (molGroup.children.length) {
+    const ch = molGroup.children[0];
+    if (ch.geometry) ch.geometry.dispose();
+    if (ch.material) ch.material.dispose();
+    molGroup.remove(ch);
+  }
+  atomMeshes = []; bondMeshes = [];
+  currentMol = mol;
+  currentRawBondOrders = rawBondOrders || null;
+  const { atoms, bonds } = mol;
+  const SCALE = 1.2;
+  let cx=0,cy=0,cz=0;
+  atoms.forEach(([,x,y,z]) => { cx+=x; cy+=y; cz+=z; });
+  cx/=atoms.length; cy/=atoms.length; cz/=atoms.length;
+
+  // Count bonds per atom
+  const bondCounts = new Array(atoms.length).fill(0);
+  const bondNeighbors = atoms.map(() => []);
+  bonds.forEach(([a,b,order], bi) => {
+    bondCounts[a]++; bondCounts[b]++;
+    const rawOrd = rawBondOrders ? rawBondOrders[bi] : order;
+    bondNeighbors[a].push({ to: b, order, rawOrder: rawOrd });
+    bondNeighbors[b].push({ to: a, order, rawOrder: rawOrd });
+  });
+
+  const positions = atoms.map(([el,x,y,z], idx) => {
+    const p = getEl(el);
+    const geo = new THREE.SphereGeometry(p.radius * 0.4, 24, 24);
+    const mat = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.3, metalness: 0.1 });
+    const mesh = new THREE.Mesh(geo, mat);
+    const px=(x-cx)*SCALE, py=(y-cy)*SCALE, pz=(z-cz)*SCALE;
+    mesh.position.set(px, py, pz);
+    mesh.userData = {
+      type: 'atom', index: idx, element: el,
+      origX: x, origY: y, origZ: z,
+      bondCount: bondCounts[idx], neighbors: bondNeighbors[idx],
+      baseColor: p.color,
+    };
+    molGroup.add(mesh);
+    atomMeshes.push(mesh);
+    return new THREE.Vector3(px, py, pz);
+  });
+
+  const bondMat = new THREE.MeshStandardMaterial({ color: 0x666680, roughness: 0.5, metalness: 0.1 });
+  bonds.forEach(([a,b,order], bondIdx) => {
+    const pa=positions[a], pb=positions[b];
+    const mid = new THREE.Vector3().addVectors(pa,pb).multiplyScalar(0.5);
+    const dir = new THREE.Vector3().subVectors(pb,pa);
+    const len = dir.length(); dir.normalize();
+    const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dir);
+
+    // Compute real-space bond length from original coordinates
+    const ax=atoms[a], bx=atoms[b];
+    const realLen = Math.sqrt((ax[1]-bx[1])**2 + (ax[2]-bx[2])**2 + (ax[3]-bx[3])**2);
+    const rawOrd = rawBondOrders ? rawBondOrders[bondIdx] : order;
+
+    const bondData = {
+      type: 'bond', bondIndex: bondIdx,
+      atomA: a, atomB: b,
+      elemA: atoms[a][0], elemB: atoms[b][0],
+      order: order, rawOrder: rawOrd,
+      length: realLen,
+    };
+
+    const makeCyl = off => {
+      const r = order > 1 ? 0.04 : 0.06;
+      const geo = new THREE.CylinderGeometry(r,r,len,8);
+      const mat2 = bondMat.clone();
+      const mesh = new THREE.Mesh(geo, mat2);
+      mesh.position.copy(mid);
+      if (off) mesh.position.add(off);
+      mesh.quaternion.copy(quat);
+      mesh.userData = bondData;
+      molGroup.add(mesh);
+      bondMeshes.push(mesh);
+    };
+    if (order === 1) { makeCyl(null); }
+    else {
+      const perp = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0,0,1));
+      if (perp.length() < 0.001) perp.crossVectors(dir, new THREE.Vector3(1,0,0));
+      perp.normalize().multiplyScalar(0.08);
+      makeCyl(perp); makeCyl(perp.clone().negate());
+      if (order === 3) makeCyl(null);
+    }
+  });
+
+  let maxDist = 0;
+  positions.forEach(p => { maxDist = Math.max(maxDist, p.length()); });
+  sphereCam.radius = Math.max(5, maxDist * 2.5 + 3);
+  camTarget.set(0, 0, 0);
+}
+
+// ── Raycaster for hover tooltips ────────────────────────────────────────
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+const tooltipEl = document.getElementById('hover-tooltip');
+let prevHighlight = null;
+
+function clearHighlight() {
+  if (prevHighlight) {
+    prevHighlight.material.emissive.setHex(0x000000);
+    prevHighlight = null;
+  }
+}
+
+function highlightMesh(mesh) {
+  if (prevHighlight && prevHighlight !== mesh) clearHighlight();
+  mesh.material.emissive.setHex(0x222244);
+  prevHighlight = mesh;
+}
+
+function positionTooltip(ex, ey) {
+  const tx = Math.min(ex + 16, window.innerWidth - 220);
+  const ty = Math.max(ey - 90, 8);
+  tooltipEl.style.left = tx + 'px';
+  tooltipEl.style.top = ty + 'px';
+  tooltipEl.style.display = 'block';
+}
+
+function showAtomTooltip(mesh, ex, ey) {
+  const d = mesh.userData;
+  const colorHex = '#' + d.baseColor.toString(16).padStart(6, '0');
+  document.getElementById('tt-swatch').style.background = colorHex;
+  document.getElementById('tt-symbol').textContent = d.element;
+  document.getElementById('tt-name').textContent = ELEM_NAMES[d.element] || d.element;
+
+  const bondStr = d.neighbors.map(n => {
+    const sym = currentMol.atoms[n.to][0];
+    const os = n.order === 2 ? '=' : n.order === 3 ? '\u2261' : '\u2013';
+    return os + sym;
+  }).join(' ');
+
+  document.getElementById('tt-rows').innerHTML =
+    '<div class="tt-row"><span class="tt-label">atom  </span>#' + d.index + '</div>' +
+    '<div class="tt-row"><span class="tt-label">pos   </span>(' + d.origX.toFixed(3) + ', ' + d.origY.toFixed(3) + ', ' + d.origZ.toFixed(3) + ')</div>' +
+    '<div class="tt-row"><span class="tt-label">bonds </span>' + d.bondCount + (bondStr ? '  ' + bondStr : '') + '</div>';
+
+  highlightMesh(mesh);
+  positionTooltip(ex, ey);
+}
+
+function showBondTooltip(mesh, ex, ey) {
+  const d = mesh.userData;
+  const rawName = PUBCHEM_BOND_NAMES[d.rawOrder] || BOND_NAMES[d.order] || 'Bond';
+  const vizName = BOND_NAMES[d.order] || 'Single';
+  const symA = d.elemA, symB = d.elemB;
+
+  // Color swatch: gray for bonds
+  document.getElementById('tt-swatch').style.background = '#666680';
+  document.getElementById('tt-symbol').textContent = symA + '\u2013' + symB;
+  document.getElementById('tt-name').textContent = rawName + ' Bond';
+
+  let rows =
+    '<div class="tt-row"><span class="tt-label">atoms </span>#' + d.atomA + ' (' + symA + ') \u2194 #' + d.atomB + ' (' + symB + ')</div>' +
+    '<div class="tt-row"><span class="tt-label">order </span>' + d.order + ' (' + vizName.toLowerCase() + ')</div>' +
+    '<div class="tt-row"><span class="tt-label">length</span>' + d.length.toFixed(3) + ' \u00c5</div>';
+
+  if (d.rawOrder !== d.order) {
+    rows += '<div class="tt-row"><span class="tt-label">type  </span>' + rawName.toLowerCase() + ' (PubChem order ' + d.rawOrder + ')</div>';
+  }
+
+  document.getElementById('tt-rows').innerHTML = rows;
+
+  highlightMesh(mesh);
+  positionTooltip(ex, ey);
+}
+
+renderer.domElement.addEventListener('mousemove', e => {
+  if (drag.active) { tooltipEl.style.display = 'none'; clearHighlight(); return; }
+
+  mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+
+  // Check atoms first (priority), then bonds
+  const allHoverable = [...atomMeshes, ...bondMeshes];
+  const hits = raycaster.intersectObjects(allHoverable);
+
+  if (hits.length > 0) {
+    const mesh = hits[0].object;
+    const d = mesh.userData;
+    if (d.type === 'atom') {
+      showAtomTooltip(mesh, e.clientX, e.clientY);
+    } else if (d.type === 'bond') {
+      showBondTooltip(mesh, e.clientX, e.clientY);
+    }
+    renderer.domElement.style.cursor = 'pointer';
+  } else {
+    clearHighlight();
+    tooltipEl.style.display = 'none';
+    renderer.domElement.style.cursor = 'grab';
+  }
+});
+
+renderer.domElement.addEventListener('mouseleave', () => {
+  tooltipEl.style.display = 'none'; clearHighlight();
+  renderer.domElement.style.cursor = 'grab';
+});
+
+// ── UI ──────────────────────────────────────────────────────────────────
+const searchEl = document.getElementById('search');
+const sugEl = document.getElementById('suggestions');
+const errEl = document.getElementById('error-box');
+const spinEl = document.getElementById('spinner');
+const infoEl = document.getElementById('mol-info');
+const nameEl = document.getElementById('mol-name');
+const formulaEl = document.getElementById('mol-formula');
+const statsEl = document.getElementById('mol-stats');
+const panelEl = document.getElementById('response-panel');
+const labelEl = document.getElementById('response-label');
+const jsonEl = document.getElementById('response-json');
+const srcEl = document.getElementById('response-source');
+
+function showError(msg) { errEl.textContent = msg; errEl.style.display = 'block'; }
+function hideError() { errEl.style.display = 'none'; }
+function showSpinner() { spinEl.style.display = 'block'; }
+function hideSpinner() { spinEl.style.display = 'none'; }
+
+function updateUI(mol, source, cid) {
+  nameEl.textContent = mol.name;
+  formulaEl.textContent = mol.formula;
+  statsEl.textContent = mol.atoms.length + ' atoms \u00b7 ' + mol.bonds.length + ' bonds';
+  infoEl.style.display = 'block';
+  labelEl.textContent = source === 'pubchem' ? 'PubChem 3D Data' : 'Local Database';
+  jsonEl.innerHTML =
+    '<span class="c-blue">{</span>\n  <span class="c-purple">"name"</span>: <span class="c-green">"' + mol.name +
+    '"</span>,\n  <span class="c-purple">"formula"</span>: <span class="c-green">"' + mol.formula +
+    '"</span>,\n  <span class="c-purple">"atoms"</span>: <span class="c-blue">[</span><span class="c-dim">' +
+    mol.atoms.length + ' items</span><span class="c-blue">]</span>,\n  <span class="c-purple">"bonds"</span>: <span class="c-blue">[</span><span class="c-dim">' +
+    mol.bonds.length + ' items</span><span class="c-blue">]</span>\n<span class="c-blue">}</span>';
+  srcEl.textContent = source === 'pubchem' ? 'source: PubChem \u00b7 CID ' + (cid || '\u2014') : 'source: local database';
+  panelEl.style.display = 'block';
+}
+
+function renderSuggestions(q) {
+  const list = getSuggestions(q);
+  if (list.length === 0 || (list.length === 1 && list[0].toLowerCase() === q.toLowerCase())) { sugEl.style.display = 'none'; return; }
+  sugEl.innerHTML = list.map(n => '<div class="suggestion">' + n + '</div>').join('');
+  sugEl.style.display = 'block';
+  sugEl.querySelectorAll('.suggestion').forEach(el => {
+    el.addEventListener('click', () => { searchEl.value = el.textContent; sugEl.style.display = 'none'; fetchMolecule(el.textContent); });
+  });
+}
+
+async function fetchMolecule(name) {
+  hideError(); showSpinner(); panelEl.style.display = 'none'; sugEl.style.display = 'none';
+
+  // 1) Local database
+  const local = findLocal(name);
+  if (local) {
+    buildMolecule(local, null);
+    updateUI(local, 'local', null);
+    hideSpinner(); return;
+  }
+
+  // 2) PubChem fallback
+  const BASE = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound';
+  const enc = encodeURIComponent(name);
+  const urls = [
+    BASE+'/name/'+enc+'/record/JSON?record_type=3d',
+    BASE+'/name/'+enc+'/record/JSON',
+    BASE+'/fastformula/'+enc+'/record/JSON?record_type=3d',
+    BASE+'/fastformula/'+enc+'/record/JSON',
+  ];
+  try {
+    let data = null;
+    for (const url of urls) {
+      try {
+        const res = await fetch(url);
+        if (res.ok) { const json = await res.json(); if (json.PC_Compounds && json.PC_Compounds[0]) { data = json; break; } }
+      } catch (_) {}
+    }
+    if (!data) throw new Error('Not found');
+    const mol = parsePubChem(data);
+    const cid = data.PC_Compounds[0].id?.id?.cid;
+    buildMolecule(mol, mol.rawBondOrders || null);
+    updateUI(mol, 'pubchem', cid);
+    hideSpinner();
+  } catch (err) {
+    hideSpinner();
+    showError('"' + name + '" not found locally or on PubChem. Try a common name like "serotonin" or formula like "C6H12O6".');
+  }
+}
+
+searchEl.addEventListener('input', () => renderSuggestions(searchEl.value));
+searchEl.addEventListener('focus', () => renderSuggestions(searchEl.value));
+document.addEventListener('click', e => { if (!e.target.closest('#search-wrap')) sugEl.style.display = 'none'; });
+document.getElementById('search-form').addEventListener('submit', e => { e.preventDefault(); if (searchEl.value.trim()) fetchMolecule(searchEl.value.trim()); });
+
+fetchMolecule('caffeine');
+</script>
+</body>
+</html>
